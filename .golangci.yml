@@ -1,0 +1,91 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - unconvert
+    - unparam
+    - goconst
+    - exhaustive
+    - misspell
+    - lll
+    - revive
+    - gocritic
+    - gosec
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    govet:
+      enable-all: true
+
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+
+    misspell:
+      locale: US
+
+    lll:
+      line-length: 120
+
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+          disabled: true
+        - name: unexported-return
+          severity: warning
+          disabled: false
+        - name: var-naming
+          severity: warning
+          disabled: false
+
+    unparam:
+      check-exported: false
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - gosec
+          - errcheck
+          - unparam
+        path: _test\.go
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+
+output:
+  formats:
+    text:
+      path: stdout
