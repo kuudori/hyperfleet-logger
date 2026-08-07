@@ -28,6 +28,7 @@ type Option func(*config)
 
 type config struct {
 	output             io.Writer
+	stackTraceFilter   func(ctx context.Context, r slog.Record) bool
 	hostname           string
 	extraContextFields []ContextField
 	level              slog.Level
@@ -73,9 +74,14 @@ func WithSanitize() Option {
 	return func(cfg *config) { cfg.sanitize = true }
 }
 
+// WithStackTrace sets a filter (checked only at LevelError+) deciding whether to attach a stack trace; unset = never.
+func WithStackTrace(filter func(ctx context.Context, r slog.Record) bool) Option {
+	return func(cfg *config) { cfg.stackTraceFilter = filter }
+}
+
 // NewHandler returns a slog.Handler that adds component, version, and
-// hostname to every record, extracts registered context fields, and
-// attaches stack traces to error-level logs.
+// hostname to every record and extracts registered context fields. Stack
+// traces on error-level records are opt-in - see WithStackTrace.
 func NewHandler(component, version string, opts ...Option) slog.Handler {
 	cfg := defaultConfig()
 	for _, opt := range opts {
@@ -93,8 +99,9 @@ func NewHandler(component, version string, opts ...Option) slog.Handler {
 	}
 
 	return &hyperfleetHandler{
-		inner:         enriched,
-		contextFields: deduplicateContextFields(defaultContextFields, cfg.extraContextFields),
+		inner:            enriched,
+		contextFields:    deduplicateContextFields(defaultContextFields, cfg.extraContextFields),
+		stackTraceFilter: cfg.stackTraceFilter,
 	}
 }
 
@@ -104,10 +111,11 @@ type groupedAttrs struct {
 }
 
 type hyperfleetHandler struct {
-	inner         slog.Handler
-	groups        []string
-	preAttrs      []groupedAttrs
-	contextFields []ContextField
+	inner            slog.Handler
+	stackTraceFilter func(ctx context.Context, r slog.Record) bool
+	groups           []string
+	preAttrs         []groupedAttrs
+	contextFields    []ContextField
 }
 
 func defaultConfig() config {
@@ -139,7 +147,7 @@ func (h *hyperfleetHandler) Handle(ctx context.Context, r slog.Record) error {
 			nr.AddAttrs(slog.Attr{Key: f.Name, Value: v})
 		}
 	}
-	if r.Level >= slog.LevelError {
+	if r.Level >= slog.LevelError && h.stackTraceFilter != nil && h.stackTraceFilter(ctx, r) {
 		nr.AddAttrs(slog.Any(FieldStackTrace, captureStackTrace()))
 	}
 
@@ -162,10 +170,11 @@ func (h *hyperfleetHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		return h
 	}
 	return &hyperfleetHandler{
-		inner:         h.inner,
-		groups:        h.groups,
-		preAttrs:      append(slices.Clone(h.preAttrs), groupedAttrs{groups: h.groups, attrs: attrs}),
-		contextFields: h.contextFields,
+		inner:            h.inner,
+		groups:           h.groups,
+		preAttrs:         append(slices.Clone(h.preAttrs), groupedAttrs{groups: h.groups, attrs: attrs}),
+		contextFields:    h.contextFields,
+		stackTraceFilter: h.stackTraceFilter,
 	}
 }
 
@@ -174,10 +183,11 @@ func (h *hyperfleetHandler) WithGroup(name string) slog.Handler {
 		return h
 	}
 	return &hyperfleetHandler{
-		inner:         h.inner,
-		groups:        append(slices.Clone(h.groups), name),
-		preAttrs:      h.preAttrs,
-		contextFields: h.contextFields,
+		inner:            h.inner,
+		groups:           append(slices.Clone(h.groups), name),
+		preAttrs:         h.preAttrs,
+		contextFields:    h.contextFields,
+		stackTraceFilter: h.stackTraceFilter,
 	}
 }
 
@@ -237,7 +247,17 @@ func newPool[T any](fn func() T) pool[T] {
 	return pool[T]{p: sync.Pool{New: func() any { return fn() }}}
 }
 
-func (p *pool[T]) Get() T  { return p.p.Get().(T) }
+func (p *pool[T]) Get() T {
+	if v, ok := p.p.Get().(T); ok {
+		return v
+	}
+	if v, ok := p.p.New().(T); ok {
+		return v
+	}
+	var zero T
+	return zero
+}
+
 func (p *pool[T]) Put(v T) { p.p.Put(v) }
 
 var pcsPool = newPool(func() *[]uintptr {

@@ -34,6 +34,9 @@ func newTestLogger(opts ...Option) (*bytes.Buffer, *slog.Logger) {
 	return &buf, slog.New(NewHandler(testComponent, "v1.2.3", defaults...))
 }
 
+// alwaysCaptureStackTrace is a WithStackTrace filter that always returns true.
+func alwaysCaptureStackTrace(context.Context, slog.Record) bool { return true }
+
 // parseJSONLog parses the first JSON line from the buffer.
 func parseJSONLog(t *testing.T, buf *bytes.Buffer) map[string]any {
 	t.Helper()
@@ -306,7 +309,7 @@ func TestTextOutput(t *testing.T) {
 
 func TestErrorStackTrace(t *testing.T) {
 	t.Parallel()
-	buf, logger := newTestLogger(WithLevel(slog.LevelDebug))
+	buf, logger := newTestLogger(WithLevel(slog.LevelDebug), WithStackTrace(alwaysCaptureStackTrace))
 	logger.ErrorContext(context.Background(), "something broke")
 	entry := parseJSONLog(t, buf)
 
@@ -337,7 +340,7 @@ func TestErrorStackTrace(t *testing.T) {
 
 func TestInfoNoStackTrace(t *testing.T) {
 	t.Parallel()
-	buf, logger := newTestLogger()
+	buf, logger := newTestLogger(WithStackTrace(alwaysCaptureStackTrace))
 	logger.InfoContext(context.Background(), "hello")
 	entry := parseJSONLog(t, buf)
 	if _, ok := entry[FieldStackTrace]; ok {
@@ -347,12 +350,112 @@ func TestInfoNoStackTrace(t *testing.T) {
 
 func TestTextErrorStackTrace(t *testing.T) {
 	t.Parallel()
-	buf, logger := newTestLogger(WithFormat(FormatText), WithLevel(slog.LevelError))
+	buf, logger := newTestLogger(
+		WithFormat(FormatText), WithLevel(slog.LevelError), WithStackTrace(alwaysCaptureStackTrace),
+	)
 	logger.ErrorContext(context.Background(), "fail")
 
 	output := buf.String()
 	if !strings.Contains(output, "stack_trace:") {
 		t.Fatal("expected stack_trace section in text output")
+	}
+}
+
+// --- WithStackTrace: opt-in, no implicit default ---
+
+func TestNoStackTraceFilterNeverCaptures(t *testing.T) {
+	t.Parallel()
+	buf, logger := newTestLogger()
+	logger.ErrorContext(context.Background(), "boom")
+	entry := parseJSONLog(t, buf)
+	if _, ok := entry[FieldStackTrace]; ok {
+		t.Fatal("expected no stack_trace when no WithStackTrace filter is registered")
+	}
+}
+
+func TestStackTraceFilterReturningFalseSkipsCapture(t *testing.T) {
+	t.Parallel()
+	buf, logger := newTestLogger(WithStackTrace(func(context.Context, slog.Record) bool { return false }))
+	logger.ErrorContext(context.Background(), "boom")
+	entry := parseJSONLog(t, buf)
+	if _, ok := entry[FieldStackTrace]; ok {
+		t.Fatal("expected no stack_trace when filter returns false")
+	}
+}
+
+func TestStackTraceFilterReturningTrueCaptures(t *testing.T) {
+	t.Parallel()
+	buf, logger := newTestLogger(WithStackTrace(alwaysCaptureStackTrace))
+	logger.ErrorContext(context.Background(), "boom")
+	entry := parseJSONLog(t, buf)
+	if _, ok := entry[FieldStackTrace]; !ok {
+		t.Fatal("expected stack_trace when filter returns true")
+	}
+}
+
+func TestStackTraceFilterNotConsultedBelowErrorLevel(t *testing.T) {
+	t.Parallel()
+	// Filter must not be invoked below LevelError.
+	called := false
+	filter := func(context.Context, slog.Record) bool {
+		called = true
+		return true
+	}
+	buf, logger := newTestLogger(WithLevel(slog.LevelDebug), WithStackTrace(filter))
+	logger.InfoContext(context.Background(), "hello")
+	entry := parseJSONLog(t, buf)
+
+	if called {
+		t.Fatal("stack trace filter must not be consulted for records below slog.LevelError")
+	}
+	if _, ok := entry[FieldStackTrace]; ok {
+		t.Fatal("expected no stack_trace on info log regardless of filter")
+	}
+}
+
+func TestStackTraceFilterReceivesRecord(t *testing.T) {
+	t.Parallel()
+	// Filter must be able to inspect the record's message and attrs.
+	var sawMessage string
+	filter := func(_ context.Context, r slog.Record) bool {
+		sawMessage = r.Message
+		var kind string
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "kind" {
+				kind = a.Value.String()
+				return false
+			}
+			return true
+		})
+		return kind == "unexpected"
+	}
+	buf, logger := newTestLogger(WithStackTrace(filter))
+
+	logger.ErrorContext(context.Background(), "expected failure", "kind", "expected")
+	entry := parseJSONLog(t, buf)
+	if sawMessage != "expected failure" {
+		t.Fatalf("filter did not see the record message: got %q", sawMessage)
+	}
+	if _, ok := entry[FieldStackTrace]; ok {
+		t.Fatal("expected no stack_trace for a record classified as expected")
+	}
+
+	buf.Reset()
+	logger.ErrorContext(context.Background(), "unexpected failure", "kind", "unexpected")
+	entry = parseJSONLog(t, buf)
+	if _, ok := entry[FieldStackTrace]; !ok {
+		t.Fatal("expected stack_trace for a record classified as unexpected")
+	}
+}
+
+func TestStackTraceFilterSurvivesWithChaining(t *testing.T) {
+	t.Parallel()
+	// Regression: stackTraceFilter must survive WithAttrs/WithGroup cloning.
+	buf, logger := newTestLogger(WithStackTrace(alwaysCaptureStackTrace))
+	logger.With("attempt", 1).WithGroup("g").ErrorContext(context.Background(), "boom")
+	entry := parseJSONLog(t, buf)
+	if _, ok := entry[FieldStackTrace]; !ok {
+		t.Fatal("expected stack_trace to survive .With()/.WithGroup() chaining")
 	}
 }
 
@@ -625,7 +728,9 @@ func TestTextNewlineEscapedInMessage(t *testing.T) {
 
 func TestTextStackTraceSanitization(t *testing.T) {
 	t.Parallel()
-	buf, logger := newTestLogger(WithFormat(FormatText), WithLevel(slog.LevelError))
+	buf, logger := newTestLogger(
+		WithFormat(FormatText), WithLevel(slog.LevelError), WithStackTrace(alwaysCaptureStackTrace),
+	)
 	logger.ErrorContext(context.Background(), "fail")
 	output := buf.String()
 

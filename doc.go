@@ -3,7 +3,7 @@
 //
 // Typical usage:
 //
-//	handler := hyperfleetlogger.NewHandler("sentinel", "v1.2.3")
+//	handler := hyperfleetlogger.NewHandler("my-service", "v1.2.3")
 //	slog.SetDefault(slog.New(handler))
 //	ctx := hyperfleetlogger.WithResourceType(context.Background(), "cluster")
 //	ctx = hyperfleetlogger.WithResourceID(ctx, "cluster-1")
@@ -18,11 +18,14 @@
 //	ctx = hyperfleetlogger.Set(ctx, RetryCountKey, 3)
 //
 //	// Register as a context field
-//	handler := hyperfleetlogger.NewHandler("sentinel", "v1.2.3",
+//	handler := hyperfleetlogger.NewHandler("my-service", "v1.2.3",
 //	    hyperfleetlogger.WithContextFields(
 //	        hyperfleetlogger.FieldFromKey(RetryCountKey, slog.IntValue),
 //	    ),
 //	)
+//
+// Stack traces on error-level records are opt-in, not automatic - see
+// WithStackTrace.
 //
 // The package intentionally stays thin: it provides handler construction,
 // context field helpers, and field name constants while callers use stdlib

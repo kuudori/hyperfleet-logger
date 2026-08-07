@@ -1,6 +1,6 @@
 # HyperFleet Logger
 
-Shared `log/slog` handler and context helpers for all HyperFleet Go components. Provides a single `NewHandler` call that enforces the [HyperFleet Logging Specification](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/logging-specification.md) - structured JSON (or human-readable text) with automatic enrichment fields, context-propagated trace/resource IDs, and stack traces on errors.
+Shared `log/slog` handler and context helpers for all HyperFleet Go components, implementing the [HyperFleet Logging Specification](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/logging-specification.md).
 
 HyperFleet components (API, Sentinel, Adapter) adopt this library to keep logs uniform across the platform. Callers use stdlib `slog` directly; this package only configures the handler.
 
@@ -9,7 +9,7 @@ HyperFleet components (API, Sentinel, Adapter) adopt this library to keep logs u
 - **Automatic enrichment** - `component`, `version`, and `hostname` on every record, at root level regardless of `WithGroup` nesting
 - **Context field extraction** - `trace_id`, `span_id`, `resource_type`, `resource_id` pulled from `context.Context` automatically
 - **Extensible context fields** - register component-specific fields (e.g. `request_id`, `event_id`, `cluster_id`) via `WithContextFields`
-- **Stack traces on errors** - `ERROR`-level and above automatically include a filtered Go stack trace; use `WARN` for expected/handled errors that don't need traces
+- **Opt-in stack traces on errors** - register a `WithStackTrace` filter to attach a filtered Go stack trace to `ERROR`-level (and above) records; each component decides for itself which errors are worth tracing
 - **Dual format** - JSON (default) for production, human-readable text for local development
 - **Zero dependencies** - stdlib only (`log/slog`, `os`, `io`, `context`)
 - **Environment-driven config** - `ParseLevel`, `ParseFormat`, `ParseOutput` parse `HYPERFLEET_LOG_LEVEL`, `HYPERFLEET_LOG_FORMAT`, `HYPERFLEET_LOG_OUTPUT` strings
@@ -48,7 +48,7 @@ func main() {
         fmt.Fprintf(os.Stderr, "invalid HYPERFLEET_LOG_OUTPUT: %v\n", err)
     }
 
-    handler := hfl.NewHandler("sentinel", "v1.2.3",
+    handler := hfl.NewHandler("my-service", "v1.2.3",
         hfl.WithLevel(level),
         hfl.WithFormat(format),
         hfl.WithOutput(output),
@@ -70,7 +70,7 @@ func main() {
   "timestamp": "2025-01-15T10:30:00.000Z",
   "level": "info",
   "message": "reconciling cluster",
-  "component": "sentinel",
+  "component": "my-service",
   "version": "v1.2.3",
   "hostname": "pod-abc",
   "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -82,7 +82,7 @@ func main() {
 **Text output** (`HYPERFLEET_LOG_FORMAT=text`):
 
 ```text
-2025-01-15T10:30:00.000Z INFO [sentinel] [v1.2.3] [pod-abc] reconciling cluster trace_id=4bf92f3577b34da6a3ce929d0e0e4736 resource_type=cluster resource_id=cls-abc-123
+2025-01-15T10:30:00.000Z INFO [my-service] [v1.2.3] [pod-abc] reconciling cluster trace_id=4bf92f3577b34da6a3ce929d0e0e4736 resource_type=cluster resource_id=cls-abc-123
 ```
 
 ## API Reference
@@ -102,6 +102,7 @@ Creates a `slog.Handler` with automatic enrichment. Options:
 | `WithOutput(io.Writer)` | `os.Stdout` | Log output destination |
 | `WithHostname(string)` | `os.Hostname()` | Override the `hostname` field |
 | `WithContextFields(...ContextField)` | built-in set | Register additional context-extracted fields |
+| `WithStackTrace(func(context.Context, slog.Record) bool)` | none (never captures) | Filter deciding whether an `ERROR`-level (or above) record gets a stack trace; only consulted at that level or above |
 
 ### Context Helpers
 
@@ -123,7 +124,7 @@ Register component-specific fields that are automatically extracted from the con
 ```go
 var reqIDKey = hfl.NewKey[string]("request_id")
 
-handler := hfl.NewHandler("api", "v1.4.0",
+handler := hfl.NewHandler("my-service", "v1.4.0",
     hfl.WithContextFields(
         hfl.StringField(reqIDKey),
     ),
@@ -159,18 +160,14 @@ hfl.FieldStackTrace   // "stack_trace"
 
 ## Error Stack Traces
 
-`ERROR`-level and above automatically include a `stack_trace` field with a filtered call stack (slog/runtime/testing internals excluded). For expected or handled errors (validation failures, 404s, retries) use `WARN` level to avoid the stack trace overhead:
+Stack trace capture is opt-in - no filter registered means no `stack_trace` field is ever added, even at `ERROR` level. `WithStackTrace` takes a predicate; it's only consulted at `ERROR` level or above:
 
-```json
-{
-  "level": "error",
-  "message": "failed to update cluster",
-  "component": "api",
-  "stack_trace": [
-    "main.handleRequest() server.go:142",
-    "main.main() main.go:28"
-  ]
-}
+```go
+handler := hfl.NewHandler("my-service", "v1.2.3",
+    hfl.WithStackTrace(func(ctx context.Context, r slog.Record) bool {
+        return true // or any caller-defined condition
+    }),
+)
 ```
 
 ## License
