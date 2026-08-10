@@ -363,33 +363,26 @@ func TestTextErrorStackTrace(t *testing.T) {
 
 // --- WithStackTrace: opt-in, no implicit default ---
 
-func TestNoStackTraceFilterNeverCaptures(t *testing.T) {
+func TestStackTraceFilterGatesCapture(t *testing.T) {
 	t.Parallel()
-	buf, logger := newTestLogger()
-	logger.ErrorContext(context.Background(), "boom")
-	entry := parseJSONLog(t, buf)
-	if _, ok := entry[FieldStackTrace]; ok {
-		t.Fatal("expected no stack_trace when no WithStackTrace filter is registered")
+	tests := []struct {
+		name    string
+		opts    []Option
+		wantKey bool
+	}{
+		{"no filter registered", nil, false},
+		{"filter returns false", []Option{WithStackTrace(func(context.Context, slog.Record) bool { return false })}, false},
+		{"filter returns true", []Option{WithStackTrace(alwaysCaptureStackTrace)}, true},
 	}
-}
-
-func TestStackTraceFilterReturningFalseSkipsCapture(t *testing.T) {
-	t.Parallel()
-	buf, logger := newTestLogger(WithStackTrace(func(context.Context, slog.Record) bool { return false }))
-	logger.ErrorContext(context.Background(), "boom")
-	entry := parseJSONLog(t, buf)
-	if _, ok := entry[FieldStackTrace]; ok {
-		t.Fatal("expected no stack_trace when filter returns false")
-	}
-}
-
-func TestStackTraceFilterReturningTrueCaptures(t *testing.T) {
-	t.Parallel()
-	buf, logger := newTestLogger(WithStackTrace(alwaysCaptureStackTrace))
-	logger.ErrorContext(context.Background(), "boom")
-	entry := parseJSONLog(t, buf)
-	if _, ok := entry[FieldStackTrace]; !ok {
-		t.Fatal("expected stack_trace when filter returns true")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf, logger := newTestLogger(tt.opts...)
+			logger.ErrorContext(context.Background(), "boom")
+			entry := parseJSONLog(t, buf)
+			if _, ok := entry[FieldStackTrace]; ok != tt.wantKey {
+				t.Fatalf("stack_trace presence: want %v, got %v", tt.wantKey, ok)
+			}
+		})
 	}
 }
 
@@ -687,6 +680,27 @@ func TestTextHandlerConcurrentWrites(t *testing.T) {
 	want := goroutines * logsPerGoroutine
 	if len(lines) != want {
 		t.Fatalf("expected %d lines, got %d", want, len(lines))
+	}
+}
+
+// --- pool fallback ---
+
+func TestPoolGetFallsBackToNewOnTypeMismatch(t *testing.T) {
+	t.Parallel()
+	p := newPool(func() *[]uintptr {
+		buf := make([]uintptr, 4)
+		return &buf
+	})
+	// Simulate sync.Pool.Get returning a value of the wrong type, which
+	// forces Get() past its type assertion and into the new() fallback.
+	p.p.Put(new(int))
+
+	got := p.Get()
+	if got == nil {
+		t.Fatal("expected a valid non-nil value from the new() fallback, got nil")
+	}
+	if len(*got) != 4 {
+		t.Fatalf("expected fallback value from new(), got %v", got)
 	}
 }
 

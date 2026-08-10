@@ -241,21 +241,23 @@ func deduplicateContextFields(defaults, extras []ContextField) []ContextField {
 	return append(result, extras...)
 }
 
-type pool[T any] struct{ p sync.Pool }
-
-func newPool[T any](fn func() T) pool[T] {
-	return pool[T]{p: sync.Pool{New: func() any { return fn() }}}
+type pool[T any] struct {
+	p   sync.Pool
+	new func() T
 }
 
+func newPool[T any](fn func() T) pool[T] {
+	return pool[T]{p: sync.Pool{New: func() any { return fn() }}, new: fn}
+}
+
+// Get always returns a value produced by the pool's constructor: on a type
+// assertion failure it calls new() directly rather than returning T's zero
+// value, which could be an unusable nil for pointer/slice/map types.
 func (p *pool[T]) Get() T {
 	if v, ok := p.p.Get().(T); ok {
 		return v
 	}
-	if v, ok := p.p.New().(T); ok {
-		return v
-	}
-	var zero T
-	return zero
+	return p.new()
 }
 
 func (p *pool[T]) Put(v T) { p.p.Put(v) }

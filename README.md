@@ -170,6 +170,20 @@ handler := hfl.NewHandler("my-service", "v1.2.3",
 )
 ```
 
+When the filter accepts a record, the resulting log gets a `stack_trace` field with a filtered call stack (slog/runtime/testing internals excluded):
+
+```json
+{
+  "level": "error",
+  "message": "failed to update cluster",
+  "component": "api",
+  "stack_trace": [
+    "main.handleRequest() server.go:142",
+    "main.main() main.go:28"
+  ]
+}
+```
+
 ## License
 
 Apache 2.0 - see [LICENSE](LICENSE) for details.
