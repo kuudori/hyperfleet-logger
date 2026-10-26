@@ -2,7 +2,7 @@
 
 ## Project Identity
 
-Shared Go library implementing HyperFleet logging with a standard-library `log/slog` handler and typed context helpers. API, Sentinel, Adapter, Applier and the E2E suite consume the module `github.com/openshift-hyperfleet/hyperfleet-logger`; callers configure the handler once and continue logging through `slog`. This is not a service or a CLI.
+Shared Go library implementing HyperFleet logging with a standard-library `log/slog` handler and typed context helpers. API, Sentinel, Adapter, Applier, the E2E suite and the Broker examples consume the module `github.com/openshift-hyperfleet/hyperfleet-logger`; callers configure the handler once and continue logging through `slog`. This is not a service or a CLI.
 
 ## Critical Rules
 

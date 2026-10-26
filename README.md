@@ -2,7 +2,7 @@
 
 Shared `log/slog` handler and context helpers for all HyperFleet Go components, implementing the [HyperFleet Logging Specification](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/logging-specification.md).
 
-HyperFleet components (API, Sentinel, Adapter, Applier and the E2E suite) adopt this library to keep logs uniform across the platform. Callers use stdlib `slog` directly; this package only configures the handler.
+HyperFleet components (including API, Sentinel, Adapter, Applier, the E2E suite and the Broker examples) adopt this library to keep logs uniform across the platform. Callers use stdlib `slog` directly; this package only configures the handler.
 
 ## Features
 
@@ -102,7 +102,7 @@ Creates a `slog.Handler` with automatic enrichment. Options:
 | `WithOutput(io.Writer)` | `os.Stdout` | Log output destination |
 | `WithHostname(string)` | `os.Hostname()` | Override the `hostname` field |
 | `WithContextFields(...ContextField)` | built-in set | Register additional context-extracted fields |
-| `WithSanitize()` | off | Text format only. Also quotes control characters in the message, keys, stack frames and `component`, `version`, `hostname`. Newlines and attribute values are always quoted |
+| `WithSanitize()` | off | Text format only. In the message, keys, stack frames and `component`, `version`, `hostname`, newlines and carriage returns are always quoted. This option also quotes the other ASCII control characters (C0 and DEL). Attribute values are quoted when they are empty or contain whitespace, `"`, `=`, invalid UTF-8 or non-printable characters, with or without this option |
 | `WithStackTrace(func(context.Context, slog.Record) bool)` | none (never captures) | Filter deciding whether an `ERROR`-level (or above) record gets a stack trace; only consulted at that level or above |
 
 ### Context Helpers
