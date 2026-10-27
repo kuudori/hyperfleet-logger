@@ -102,7 +102,7 @@ Creates a `slog.Handler` with automatic enrichment. Options:
 | `WithOutput(io.Writer)` | `os.Stdout` | Log output destination |
 | `WithHostname(string)` | `os.Hostname()` | Override the `hostname` field |
 | `WithContextFields(...ContextField)` | built-in set | Register additional context-extracted fields |
-| `WithSanitize()` | off | Text format only. In the message, keys, stack frames and `component`, `version`, `hostname`, newlines and carriage returns are always quoted. This option also quotes the other ASCII control characters (C0 and DEL). Attribute values are quoted when they are empty or contain whitespace, `"`, `=`, invalid UTF-8 or non-printable characters, with or without this option |
+| `WithSanitize()` | off | Text format only. Newlines and carriage returns are always quoted in the message, keys, stack frames and `component`, `version` and `hostname`. This option also quotes the other ASCII control characters (C0 and DEL). Attribute values are quoted when they are empty or contain whitespace, `"`, `=`, invalid UTF-8 or non-printable characters, with or without this option |
 | `WithStackTrace(func(context.Context, slog.Record) bool)` | none (never captures) | Filter deciding whether an `ERROR`-level (or above) record gets a stack trace; only consulted at that level or above |
 
 ### Context Helpers
